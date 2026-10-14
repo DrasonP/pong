@@ -10,7 +10,7 @@ Versioning
 ==========
 
 Github Link: 
-
+    https://github.com/DrasonP/pong
 General Info
 ============
 This file describes how to install/run your program and anything else you think the user should know

@@ -3,7 +3,7 @@
 #                           Paola Martinez
 #                           Robert Pike
 # Email Addresses:          dpsw224@uky.edu
-#
+#                           paola.mar@uky.edu
 #                           rfpi223@uky.edu
 # Date:                     <The date the file was last edited>
 # Purpose:                  <How this file contributes to the project>

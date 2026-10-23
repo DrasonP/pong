@@ -5,6 +5,7 @@ Group Members & Email Addresses:
 
     Drason Swihart, dpsw224@uky.edu
     Paola Martinez, paola.mar@uky.edu
+    Robert Pike,    rfpi223@uky.edu
 
 Versioning
 ==========

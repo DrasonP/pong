@@ -12,6 +12,11 @@
 
 import socket
 import threading
+import json
+
+HOST = "0.0.0.0"
+PORT = 5000
+
 
 
 # Use this file to write your server logic

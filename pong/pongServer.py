@@ -5,13 +5,14 @@
 # Email Addresses:          dpsw224@uky.edu
 #                           paola.mar@uky.edu
 #                           rfpi223@uky.edu
-# Date:                     <The date the file was last edited>
-# Purpose:                  <How this file contributes to the project>
+# Date:                     10/28/2026
+# Purpose:                  Server code: Accepts both clients · Uses threads · Relays paddle positions, ball location, and score
 # Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
 
 import socket
 import threading
+
 
 # Use this file to write your server logic
 # You will need to support at least two clients

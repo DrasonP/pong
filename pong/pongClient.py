@@ -1,8 +1,8 @@
 # =================================================================================================
 # Contributing Authors:	    <Drason Swihart, Paola Martinez, Robert Pike>
 # Email Addresses:          <dpsw224@uky.edu , paola.mar@uky.edu, rfpi223@uky.edu>
-# Date:                     <The date the file was last edited>
-# Purpose:                  <How this file contributes to the project>
+# Date:                     10/28/2026
+# Purpose:                  Client code: Each client will send paddle position · Receives game state
 # Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
 

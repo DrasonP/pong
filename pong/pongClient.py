@@ -13,6 +13,20 @@ import socket
 
 from assets.code.helperCode import *
 
+#Send JSON message
+def sendMessage(client, message):
+    data = json.dumps(message) + "\n"
+    client.sendall(data.encode("utf-8"))
+
+#Recieve JSON message 
+def recieveMessage(stream):
+    data = stream.readline()
+
+    if not data:
+        raise ConnectionError("Server disconnected")
+
+    return json.loads(data.decode("utf-8"))
+
 # This is the main game loop.  For the most part, you will not need to modify this.  The sections
 # where you should add to the code are marked.  Feel free to change any part of this project
 # to suit your needs.
@@ -177,18 +191,30 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     # You don't have to use SOCK_STREAM, use what you think is best
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
+    try: 
+    client.connect((ip, int(port)))
+    stream = client.makefile("rwb")
+
     # Get the required information from your server (screen width, height & player paddle, "left or "right)
+    serverData = recieveMessage(stream)
 
+    screenWidth = serverData["screen_width"]
+    screenHeight = serverData["screen_height"]
+    playerPaddle = serverData["player_paddle"]
 
-    # If you have messages you'd like to show the user use the errorLabel widget like so
-    errorLabel.config(text=f"Some update text. You input: IP: {ip}, Port: {port}")
-    # You may or may not need to call this, depending on how many times you update the label
-    errorLabel.update()     
-
+    errorLabel.config(text="Connected! Starting game...")
+    errorLabel.update()
+  
     # Close this window and start the game with the info passed to you from the server
-    #app.withdraw()     # Hides the window (we'll kill it later)
-    #playGame(screenWidth, screenHeight, ("left"|"right"), client)  # User will be either left or right paddle
-    #app.quit()         # Kills the window
+    app.withdraw()     # Hides the window
+    playGame(screenWidth, screenHeight, playerPaddle, client, stream)  #Starts the game
+    app.quit()         # Kills the window
+
+except (OSError, ValueError, KeyError, ConnectionError, json.JSONDecodeError) as error:
+    errorLabel.config(text=f"Connection Failed: {error}")
+    errorLabel.update()
+
+    client.close()
 
 
 # This displays the opening screen, you don't need to edit this (but may if you like)

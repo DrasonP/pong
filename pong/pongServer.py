@@ -112,8 +112,117 @@ def process_update(player, message):
         snapshot = make_snapshot()
     
         return snapshot, ahead, left_sync, right_sync
+
+
+def handle_client(client, player):
+    """Receive updates from one client and relay shared state."""
+    reader = client.makefile("r", encoding="utf-8")
+
+    try:
+        while True:
+            line = reader.readline()
+
+            if not line:
+                break
+
+            message = json.loads(line)
+
+            snapshot, ahead, left_sync, right_sync = process_update(
+                player, message
+            )
+
+            # Log only when the clients have different sync counters.
+            if left_sync != right_sync:
+                print(
+                    f"Out of sync: left={left_sync}, "
+                    f"right={right_sync}. "
+                    f"Using {ahead} player's ball and score."
+                )
+
+            # Send the same snapshot to both connected clients.
+            with lock:
+                destinations = list(clients.items())
+
+            for destination, destination_socket in destinations:
+                try:
+                    send_message(
+                        destination_socket,
+                        destination,
+                        snapshot
+                    )
+                except OSError:
+                    print(f"Could not send update to {destination}")
+
+    except (OSError, ValueError, KeyError, TypeError,
+            json.JSONDecodeError) as error:
+        print(f"{player} client error: {error}")
+
+    finally:
+        reader.close()
+        client.close()
+
+        with lock:
+            if clients.get(player) is client:
+                del clients[player]
+
+        print(f"{player} client disconnected")
+      
 def main():
-  
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((HOST, PORT))
+    server.listen(2)
+
+    print(f"Server listening on {HOST}:{PORT}")
+    print("Waiting for two players...")
+
+    try:
+        for player in ("left", "right"):
+            client, address = server.accept()
+
+            with lock:
+                clients[player] = client
+
+            # Initial configuration message.
+            send_message(client, player, {
+                "width": SCREEN_WIDTH,
+                "height": SCREEN_HEIGHT,
+                "player": player
+            })
+
+            print(f"{player} player connected: {address}")
+
+            threading.Thread(
+                target=handle_client,
+                args=(client, player),
+                daemon=True
+            ).start()
+
+        print("Both players connected.")
+
+        while True:
+            threading.Event().wait(1)
+
+    except KeyboardInterrupt:
+        print("\nShutting down server...")
+
+    finally:
+        with lock:
+            connected = list(clients.values())
+            clients.clear()
+
+        for client in connected:
+            try:
+                client.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            client.close()
+
+        server.close()
+
+
+if __name__ == "__main__":
+    main()
 # Use this file to write your server logic
 # You will need to support at least two clients
 # You will need to keep track of where on the screen (x,y coordinates) each paddle is, the score 

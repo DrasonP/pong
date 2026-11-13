@@ -27,7 +27,10 @@ clients = {}
 send_locks = {"left": threading.Lock(), "right": threading.Lock()}
               
 state = {
-  "paddles": {"left": 215, "right": 215},
+  "paddles": {
+      "left": {"x": 10, "y": 215} , 
+      "right": {"x": 620, "y": 215}
+      }, #matching client paddle info structure
     "ball": {
         "x": 320,
         "y": 240,
@@ -41,11 +44,11 @@ state = {
 # Latest complete game state reported by each client
 reports = {"left": None, "right": None}
 
-def send_message(client,message):
+def send_message(client, player, message):
   """Send a JSON message, end with newline"""
   data = json.dumps(message) + "\n"
   with send_locks[player]:
-    client.sendall(data)
+    client.sendall(data.encode("utf-8")) #added encode to convert text into bytes
 
 def make_snapshot():
     """Create a consistent copy of the current game state."""
@@ -185,9 +188,9 @@ def main():
 
             # Initial configuration message.
             send_message(client, player, {
-                "width": SCREEN_WIDTH,
-                "height": SCREEN_HEIGHT,
-                "player": player
+                "screen_width": SCREEN_WIDTH,
+                "screen_height": SCREEN_HEIGHT,
+                "player_paddle": player
             })
 
             print(f"{player} player connected: {address}")

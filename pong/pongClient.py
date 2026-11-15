@@ -28,10 +28,11 @@ def recieveMessage(stream):
 
     return json.loads(data.decode("utf-8"))
 
+
 # This is the main game loop.  For the most part, you will not need to modify this.  The sections
 # where you should add to the code are marked.  Feel free to change any part of this project
 # to suit your needs.
-def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.socket) -> None:
+def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.socket, stream) -> None:
     
     # Pygame inits
     pygame.mixer.pre_init(44100, -16, 2, 2048)
@@ -75,104 +76,148 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 
     sync = 0
 
-    while True:
-        # Wiping the screen
-        screen.fill((0,0,0))
+    try: 
+        while True:
+            # Wiping the screen
+            screen.fill((0,0,0))
 
-        # Getting keypress events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_DOWN:
-                    playerPaddleObj.moving = "down"
+            # Getting keypress events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_DOWN:
+                        playerPaddleObj.moving = "down"
 
-                elif event.key == pygame.K_UP:
-                    playerPaddleObj.moving = "up"
+                    elif event.key == pygame.K_UP:
+                        playerPaddleObj.moving = "up"
 
-            elif event.type == pygame.KEYUP:
-                playerPaddleObj.moving = ""
+                elif event.type == pygame.KEYUP:
+                    playerPaddleObj.moving = ""
 
-        # =========================================================================================
-        # Your code here to send an update to the server on your paddle's information,
-        # where the ball is and the current score.
-        # Feel free to change when the score is updated to suit your needs/requirements
-        
-        
-        # =========================================================================================
+            # Update the player paddle and opponent paddle's location on the screen
+            if playerPaddleObj.moving == "down":
+                if playerPaddleObj.rect.bottomleft[1] < screenHeight-10:
+                    playerPaddleObj.rect.y += playerPaddleObj.speed
+            elif playerPaddleObj.moving == "up":
+                if playerPaddleObj.rect.topleft[1] > 10:
+                    playerPaddleObj.rect.y -= playerPaddleObj.speed
 
-        # Update the player paddle and opponent paddle's location on the screen
-        for paddle in [playerPaddleObj, opponentPaddleObj]:
-            if paddle.moving == "down":
-                if paddle.rect.bottomleft[1] < screenHeight-10:
-                    paddle.rect.y += paddle.speed
-            elif paddle.moving == "up":
-                if paddle.rect.topleft[1] > 10:
-                    paddle.rect.y -= paddle.speed
+            # If the game is over, display the win message
+            if lScore > 4 or rScore > 4:
+                winText = "Player 1 Wins! " if lScore > 4 else "Player 2 Wins! "
+                textSurface = winFont.render(winText, False, WHITE, (0,0,0))
+                textRect = textSurface.get_rect()
+                textRect.center = ((screenWidth/2), screenHeight/2)
+                winMessage = screen.blit(textSurface, textRect)
+            else:
 
-        # If the game is over, display the win message
-        if lScore > 4 or rScore > 4:
-            winText = "Player 1 Wins! " if lScore > 4 else "Player 2 Wins! "
-            textSurface = winFont.render(winText, False, WHITE, (0,0,0))
-            textRect = textSurface.get_rect()
-            textRect.center = ((screenWidth/2), screenHeight/2)
-            winMessage = screen.blit(textSurface, textRect)
-        else:
+                # ==== Ball Logic =====================================================================
+                ball.updatePos()
 
-            # ==== Ball Logic =====================================================================
-            ball.updatePos()
-
-            # If the ball makes it past the edge of the screen, update score, etc.
-            if ball.rect.x > screenWidth:
-                lScore += 1
-                pointSound.play()
-                ball.reset(nowGoing="left")
-            elif ball.rect.x < 0:
-                rScore += 1
-                pointSound.play()
-                ball.reset(nowGoing="right")
+                # If the ball makes it past the edge of the screen, update score, etc.
+                if ball.rect.x > screenWidth:
+                    lScore += 1
+                    pointSound.play()
+                    ball.reset(nowGoing="left")
+                elif ball.rect.x < 0:
+                    rScore += 1
+                    pointSound.play()
+                    ball.reset(nowGoing="right")
                 
-            # If the ball hits a paddle
-            if ball.rect.colliderect(playerPaddleObj.rect):
-                bounceSound.play()
-                ball.hitPaddle(playerPaddleObj.rect.center[1])
-            elif ball.rect.colliderect(opponentPaddleObj.rect):
-                bounceSound.play()
-                ball.hitPaddle(opponentPaddleObj.rect.center[1])
+                # If the ball hits a paddle
+                if ball.rect.colliderect(playerPaddleObj.rect):
+                    bounceSound.play()
+                    ball.hitPaddle(playerPaddleObj.rect.center[1])
+                elif ball.rect.colliderect(opponentPaddleObj.rect):
+                    bounceSound.play()
+                    ball.hitPaddle(opponentPaddleObj.rect.center[1])
                 
-            # If the ball hits a wall
-            if ball.rect.colliderect(topWall) or ball.rect.colliderect(bottomWall):
-                bounceSound.play()
-                ball.hitWall()
+                # If the ball hits a wall
+                if ball.rect.colliderect(topWall) or ball.rect.colliderect(bottomWall):
+                    bounceSound.play()
+                    ball.hitWall()
             
-            pygame.draw.rect(screen, WHITE, ball)
-            # ==== End Ball Logic =================================================================
+                pygame.draw.rect(screen, WHITE, ball)
+                # ==== End Ball Logic =================================================================
 
-        # Drawing the dotted line in the center
-        for i in centerLine:
-            pygame.draw.rect(screen, WHITE, i)
+            # Drawing the dotted line in the center
+            for i in centerLine:
+                pygame.draw.rect(screen, WHITE, i)
         
-        # Drawing the player's new location
-        for paddle in [playerPaddleObj, opponentPaddleObj]:
-            pygame.draw.rect(screen, WHITE, paddle)
+            # Drawing the player's new location
+            for paddle in [playerPaddleObj, opponentPaddleObj]:
+                pygame.draw.rect(screen, WHITE, paddle)
 
-        pygame.draw.rect(screen, WHITE, topWall)
-        pygame.draw.rect(screen, WHITE, bottomWall)
-        scoreRect = updateScore(lScore, rScore, screen, WHITE, scoreFont)
-        pygame.display.update()        
-        clock.tick(60)
+            pygame.draw.rect(screen, WHITE, topWall)
+            pygame.draw.rect(screen, WHITE, bottomWall)
+            scoreRect = updateScore(lScore, rScore, screen, WHITE, scoreFont)
+            pygame.display.update()
+            clock.tick(60)
         
-        # This number should be synchronized between you and your opponent.  If your number is larger
-        # then you are ahead of them in time, if theirs is larger, they are ahead of you, and you need to
-        # catch up (use their info)
-        sync += 1
-        # =========================================================================================
-        # Send your server update here at the end of the game loop to sync your game with your
-        # opponent's game
+            # =========================================================================================
+            # Send your server update here at the end of the game loop to sync your game with your
+            # opponent's game
+            # =========================================================================================
 
-        # =========================================================================================
+            #Send ball, paddle, and score info to server
+            sync += 1
 
+            message = {
+                "paddle": {
+                    "x": playerPaddleObj.rect.x,
+                    "y": playerPaddleObj.rect.y
+                },
+                "ball": {
+                    "x": ball.rect.x,
+                    "y": ball.rect.y,
+                    "xVel": ball.xVel,
+                    "yVel": ball.yVel
+                },
+                "scores": {
+                    "left": lScore,
+                    "right": rScore
+                },
+                "sync": sync
+            }
+
+            sendMessage(client, message)
+
+            #Recieve opponent info from Server
+            serverData = recieveMessage(stream)
+
+            # Update opponent paddle
+            if playerPaddle == "left":
+                opponentSide = "right"
+            else:
+                opponentSide = "left"
+
+            opponentPaddleObj.rect.x = serverData["paddles"][opponentSide]["x"]
+            opponentPaddleObj.rect.y = serverData["paddles"][opponentSide]["y"]
+
+            # Update ball position and velocity
+            ball.rect.x = serverData["ball"]["x"]
+            ball.rect.y = serverData["ball"]["y"]
+            ball.xVel = serverData["ball"]["xVel"]
+            ball.yVel = serverData["ball"]["yVel"]
+
+            # Update scores
+            lScore = serverData["scores"]["left"]
+            rScore = serverData["scores"]["right"]
+
+            # Synchronize game counters
+            sync = max(serverData["sync"]["left"], serverData["sync"]["right"])
+
+    except(OSError, ConnectionError, json.JSONDecodeError) as error:
+        errorLabel.config(text=f"Connection error: {error}")
+        errorLabel.update()
+
+    finally:
+        stream.close()
+        client.close()
+
+        pygame.quit()
 
 
 
@@ -189,33 +234,32 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     # app           The tk window object, needed to kill the window
     
     # Create a socket and connect to the server
-    # You don't have to use SOCK_STREAM, use what you think is best
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try: 
-    client.connect((ip, int(port)))
-    stream = client.makefile("rwb")
+        client.connect((ip, int(port)))
+        stream = client.makefile("rwb")
 
-    # Get the required information from your server (screen width, height & player paddle, "left or "right)
-    serverData = recieveMessage(stream)
+        # Get the required information from your server (screen width, height & player paddle, "left or "right)
+        serverData = recieveMessage(stream)
 
-    screenWidth = serverData["screen_width"]
-    screenHeight = serverData["screen_height"]
-    playerPaddle = serverData["player_paddle"]
+        screenWidth = serverData["screen_width"]
+        screenHeight = serverData["screen_height"]
+        playerPaddle = serverData["player_paddle"]
 
-    errorLabel.config(text="Connected! Starting game...")
-    errorLabel.update()
-  
-    # Close this window and start the game with the info passed to you from the server
-    app.withdraw()     # Hides the window
-    playGame(screenWidth, screenHeight, playerPaddle, client, stream)  #Starts the game
-    app.quit()         # Kills the window
+        errorLabel.config(text="Connected! Starting game...")
+        errorLabel.update()
+      
+        # Close this window and start the game with the info passed to you from the server
+        app.withdraw()     # Hides the window
+        playGame(screenWidth, screenHeight, playerPaddle, client, stream)  #Starts the game
+        app.quit()         # Kills the window
 
-except (OSError, ValueError, KeyError, ConnectionError, json.JSONDecodeError) as error:
-    errorLabel.config(text=f"Connection Failed: {error}")
-    errorLabel.update()
+    except (OSError, ValueError, KeyError, ConnectionError, json.JSONDecodeError) as error:
+        errorLabel.config(text=f"Connection Failed: {error}")
+        errorLabel.update()
 
-    client.close()
+        client.close()
 
 
 # This displays the opening screen, you don't need to edit this (but may if you like)
@@ -249,9 +293,4 @@ def startScreen():
     app.mainloop()
 
 if __name__ == "__main__":
-    #startScreen()
-    
-    # Uncomment the line below if you want to play the game without a server to see how it should work
-    # the startScreen() function should call playGame with the arguments given to it by the server this is
-    # here for demo purposes only
-    playGame(640, 480,"left",socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+    startScreen()

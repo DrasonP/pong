@@ -169,7 +169,32 @@ def handle_client(client, player):
                 del clients[player]
 
         print(f"{player} client disconnected")
-      
+
+# for actual client connection
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+server.bind((HOST, PORT))
+
+server.listen(2)
+
+print(f"Server listening on {HOST}:{PORT}")
+
+while True:
+    client_socket, address = server.accept()
+
+    clients.append(client_socket)
+
+    player_number = len(clients)
+
+    print(f"Player {player_number} connected from {address}")
+
+    threading.Thread(
+        target=handle_client,
+        args=(client_socket, player_number),
+        daemon=True
+    ).start()
+
+
 def main():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

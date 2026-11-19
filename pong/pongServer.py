@@ -6,7 +6,13 @@
 #                           paola.mar@uky.edu
 #                           rfpi223@uky.edu
 # Date:                     10/28/2026
-# Purpose:                  Server code: Accepts both clients · Uses threads · Relays paddle positions, ball location, and score
+# Purpose:                  Server code:    - Supports unlimited client connections
+#                                           - Assigns clients to independent two-player games
+#                                           - Assigns left and right paddles
+#                                           - Tracks paddle positions, ball position, velocity, and scores
+#                                           - Synchronizes clients using their sync counters
+#                                           - Handles client disconnections
+#                                           - Provides a framework for a Play Again feature
 # Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
 
@@ -20,234 +26,567 @@ PORT = 5000
 SCREEN_WIDTH = 640
 SCREEN_HEIGHT = 480
 
-# Protect shared game state because both client threads use it.
-lock = threading.Lock()
 
-clients = {}
-send_locks = {"left": threading.Lock(), "right": threading.Lock()}
-              
-state = {
-  "paddles": {
-      "left": {"x": 10, "y": 215} , 
-      "right": {"x": 620, "y": 215}
-      }, #matching client paddle info structure
-    "ball": {
-        "x": 320,
-        "y": 240,
-        "xVel": -5,
-        "yVel": 0
-    },
-    "scores": {"left": 0, "right": 0},
-    "sync": {"left": 0, "right": 0}
-}
+# game room to support multiple client connections
+class GameRoom:
+    """
+    Represents one independent two-player Pong game.
 
-# Latest complete game state reported by each client
-reports = {"left": None, "right": None}
+    Each room contains:
+        - One left player
+        - One right player
+        - Both paddle positions
+        - Ball position and velocity
+        - Both player scores
+        - Synchronization counters
+    """
 
-def send_message(client, player, message):
-  """Send a JSON message, end with newline"""
-  data = json.dumps(message) + "\n"
-  with send_locks[player]:
-    client.sendall(data.encode("utf-8")) #added encode to convert text into bytes
+    def __init__(self):
 
-def make_snapshot():
-    """Create a consistent copy of the current game state."""
-    return {
-        "paddles": {
-            "left": dict(state["paddles"]["left"]),
-            "right": dict(state["paddles"]["right"])
-        },
-        "ball": dict(state["ball"]),
-        "scores": dict(state["scores"]),
-        "sync": dict(state["sync"])
-    }
+        self.lock = threading.Lock()
 
-def process_update(player, message):
-  """Save an update and choose the state used for resynchronization"""
-  with lock:
-    # store player's paddle coords
-    paddle = message["paddle"]
-    state["paddles"][player] = {
-      "x": int(paddle["x"]),
-      "y": int(paddle["y"])
-    }
-
-    #record how many game-loop updates this client has completed
-    client_sync = int(message["sync"])
-    state["sync"][player] = client_sync
-
-    #save complete report from this client
-    reports[player] = message
-
-    left_sync = state["sync"]["left"]
-    right_sync = state["sync"]["right"]
-
-    # The client with the larger sync counter is ahead.
-    if left_sync > right_sync:
-        ahead = "left"
-    elif right_sync > left_sync:
-        ahead = "right"
-    else:
-        # When counters match, use the newest report.
-        ahead = player
-
-    # Use the ahead client's ball and score as the reference.
-    report = reports[ahead]
-
-    if report is not None:
-        ball = report["ball"]
-        scores = report["scores"]
-
-        state["ball"] = {
-            "x": int(ball["x"]),
-            "y": int(ball["y"]),
-            "xVel": int(ball["xVel"]),
-            "yVel": int(ball["yVel"])
+        # Connected players
+        self.players = {
+            "left": None,
+            "right": None
         }
 
-        state["scores"] = {
-            "left": int(scores["left"]),
-            "right": int(scores["right"])
+        # Latest game state reported by each player
+        self.reports = {
+            "left": None,
+            "right": None
         }
-    
-            # If both clients have reported, send the higher sync counter
-            # to both clients so the lagging client can catch up.
-        snapshot = make_snapshot()
-    
-        return snapshot, ahead, left_sync, right_sync
+
+        # Shared game state
+        self.state = {
+            "paddles": {
+                "left": {"x": 10, "y": 215},
+                "right": {"x": 620, "y": 215}
+            },
+
+            "ball": {
+                "x": 320,
+                "y": 240,
+                "xVel": -5,
+                "yVel": 0
+            },
+
+            "scores": {
+                "left": 0,
+                "right": 0
+            },
+
+            "sync": {
+                "left": 0,
+                "right": 0
+            }
+        }
+
+        # Signals when both players have connected.
+        self.ready_event = threading.Event()
+
+        # Play Again tracking
+        self.play_again = set()
+
+        # Players who still need to receive a reset notification
+        self.reset_pending = set()
+
+        # Current game number
+        self.round_number = 1
+
+        # Indicates whether the room has been closed
+        self.closed = False
 
 
-def handle_client(client, player):
-    """Receive updates from one client and relay shared state."""
+  # process client update
+    def process_update(self, player, message):
+        """
+        Receives a game update from one client.
+
+        Updates:
+            - Player's paddle position
+            - Player's synchronization counter
+            - Player's reported ball position
+            - Player's reported scores
+
+        Uses the client with the higher sync counter as the
+        reference for ball position and scores.
+        """
+
+        with self.lock:
+
+            # Update this player's paddle position
+            paddle = message["paddle"]
+
+            self.state["paddles"][player] = {
+                "x": int(paddle["x"]),
+                "y": int(paddle["y"])
+            }
+
+            # Update synchronization counter
+            client_sync = int(message["sync"])
+
+            self.state["sync"][player] = client_sync
+
+            # Save the complete report from this client
+            self.reports[player] = message
+
+            left_sync = self.state["sync"]["left"]
+            right_sync = self.state["sync"]["right"]
+
+            # Determine which client is ahead
+            if left_sync > right_sync:
+                ahead = "left"
+
+            elif right_sync > left_sync:
+                ahead = "right"
+
+            else:
+                # If counters match, use the newest report.
+                ahead = player
+
+            # Use the ahead player's ball and score
+            report = self.reports[ahead]
+
+            if report is not None:
+
+                ball = report["ball"]
+                scores = report["scores"]
+
+                self.state["ball"] = {
+                    "x": int(ball["x"]),
+                    "y": int(ball["y"]),
+                    "xVel": int(ball["xVel"]),
+                    "yVel": int(ball["yVel"])
+                }
+
+                self.state["scores"] = {
+                    "left": int(scores["left"]),
+                    "right": int(scores["right"])
+                }
+
+            # Check for Play Again request
+                            """
+                        CHANGEME
+                           """
+
+            if (message.get("action") == "play_again"
+                    or message.get("play_again") is True):
+
+                self.play_again.add(player)
+
+
+            # Reset game when BOTH players agree
+            if len(self.play_again) == 2:
+
+                self.reset_game()
+
+            # Create a snapshot for this client
+            snapshot = self.make_snapshot(player)
+
+            return snapshot, ahead, left_sync, right_sync
+
+    # CREATE GAME STATE SNAPSHOT
+    def make_snapshot(self, player):
+        """
+        Creates a consistent copy of the shared game state.
+        """
+
+        reset = player in self.reset_pending
+
+        # This player has now received the reset notification.
+        self.reset_pending.discard(player)
+
+        return {
+            "paddles": {
+                "left": dict(self.state["paddles"]["left"]),
+                "right": dict(self.state["paddles"]["right"])
+            },
+
+            "ball": dict(self.state["ball"]),
+
+            "scores": dict(self.state["scores"]),
+
+            "sync": dict(self.state["sync"]),
+
+            # Additional fields for future client functionality
+            "game_over": (
+                self.state["scores"]["left"] > 4
+                or self.state["scores"]["right"] > 4
+            ),
+
+            "round": self.round_number,
+
+            "reset": reset,
+
+            "ready_to_restart": (
+                player in self.play_again
+            )
+        }
+
+    # RESET GAME
+    def reset_game(self):
+        """
+        Resets the game after both players select Play Again.
+
+        Synchronization counters are preserved so that clients
+        do not have to restart their counters.
+        """
+
+        # Reset paddle positions
+        self.state["paddles"] = {
+            "left": {"x": 10, "y": 215},
+            "right": {"x": 620, "y": 215}
+        }
+
+        # Reset ball position and velocity
+        self.state["ball"] = {
+            "x": 320,
+            "y": 240,
+            "xVel": -5,
+            "yVel": 0
+        }
+
+        # Reset scores
+        self.state["scores"] = {
+            "left": 0,
+            "right": 0
+        }
+
+        # Remove old reports so an old game state cannot
+        # immediately overwrite the newly reset game.
+        self.reports = {
+            "left": None,
+            "right": None
+        }
+
+        # Both clients must receive a reset notification.
+        self.reset_pending = {"left", "right"}
+
+        # Clear Play Again requests for the next round.
+        self.play_again.clear()
+
+        self.round_number += 1
+
+        print(f"Game reset! Starting round {self.round_number}")
+
+
+# SERVER MANAGEMENT
+
+# Protects the list of active rooms and player assignments.
+manager_lock = threading.Lock()
+
+# All currently active game rooms.
+rooms = set()
+
+# Room currently waiting for its second player.
+waiting_room = None
+
+
+# SEND JSON MESSAGE
+def send_message(client, message):
+    """
+    Sends a JSON message to a client.
+
+    A newline marks the end of each message so the client
+    can read messages using readline().
+    """
+
+    data = json.dumps(message) + "\n"
+
+    client.sendall(data.encode("utf-8"))
+
+
+# HANDLE CLIENT
+def handle_client(client, player, room):
+    """
+    Handles communication with one connected client.
+
+    Each client gets its own thread.
+
+    The function:
+        1. Receives the client's game update.
+        2. Updates the shared game state.
+        3. Determines which client is ahead.
+        4. Sends the latest game state back to that client.
+        5. Repeats until the client disconnects.
+    """
+
     reader = client.makefile("r", encoding="utf-8")
 
+    print(f"{player} player connected to game room.")
+
     try:
+
         while True:
+
+            # Receive client update
+
             line = reader.readline()
 
             if not line:
                 break
 
             message = json.loads(line)
+=
+            # Wait until both players have joined
 
-            snapshot, ahead, left_sync, right_sync = process_update(
-                player, message
+            # The first player can connect and send an update
+            # before the second player joins.
+            #
+            # We wait here rather than sending incomplete
+            # game information to the first client.
+
+            room.ready_event.wait()
+
+            if room.closed:
+                break
+
+            # Process update and create snapshot
+            snapshot, ahead, left_sync, right_sync = (
+                room.process_update(player, message)
             )
 
-            # Log only when the clients have different sync counters.
+            # Synchronization information-
+
             if left_sync != right_sync:
+
                 print(
-                    f"Out of sync: left={left_sync}, "
+                    f"Game synchronization: "
+                    f"left={left_sync}, "
                     f"right={right_sync}. "
                     f"Using {ahead} player's ball and score."
                 )
 
-            # Send the same snapshot to both connected clients.
-            with lock:
-                destinations = list(clients.items())
+            # Send updated state to this client
 
-            for destination, destination_socket in destinations:
-                try:
-                    send_message(
-                        destination_socket,
-                        destination,
-                        snapshot
-                    )
-                except OSError:
-                    print(f"Could not send update to {destination}")
+            # IMPORTANT:
+            # Each client receives exactly one response for
+            # each update it sends.
+            #
+            # Sending to both clients every time either client
+            # updates would create extra messages in the
+            # clients' incoming streams.
 
-    except (OSError, ValueError, KeyError, TypeError,
-            json.JSONDecodeError) as error:
+            send_message(client, snapshot)
+
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        json.JSONDecodeError
+    ) as error:
+
         print(f"{player} client error: {error}")
 
     finally:
+
         reader.close()
         client.close()
 
-        with lock:
-            if clients.get(player) is client:
-                del clients[player]
+        print(f"{player} player disconnected.")
 
-        print(f"{player} client disconnected")
+        # Clean up disconnected player and game room
 
-# for actual client connection
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        global waiting_room
 
-server.bind((HOST, PORT))
+        with manager_lock:
 
-server.listen(2)
+            with room.lock:
 
-print(f"Server listening on {HOST}:{PORT}")
+                if room.players.get(player) is client:
 
-while True:
-    client_socket, address = server.accept()
+                    room.players[player] = None
 
-    clients.append(client_socket)
+                room.closed = True
 
-    player_number = len(clients)
+                # Wake any thread waiting for the second player.
+                room.ready_event.set()
 
-    print(f"Player {player_number} connected from {address}")
+                # Find the remaining player, if one exists.
+                opponent = (
+                    room.players["right"]
+                    if player == "left"
+                    else room.players["left"]
+                )
 
-    threading.Thread(
-        target=handle_client,
-        args=(client_socket, player_number),
-        daemon=True
-    ).start()
+            rooms.discard(room)
+
+            if waiting_room is room:
+                waiting_room = None
+
+        # Disconnect the opponent so their client can
+        # detect that the game has ended.
+        if opponent is not None:
+
+            try:
+                opponent.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
 
+# ASSIGN NEW CLIENT TO A GAME
+
+def assign_player(client):
+    """
+    Assigns a newly connected client to a game.
+
+    If a room is waiting for a player:
+        Assign the new client to the right paddle.
+
+    Otherwise:
+        Create a new room and assign the client to the left paddle.
+    """
+
+    global waiting_room
+
+    with manager_lock:
+
+        # Check whether an existing room needs another player
+        if waiting_room is not None and not waiting_room.closed:
+
+            room = waiting_room
+
+            player = "right"
+
+            room.players[player] = client
+
+            # Both players are now connected.
+            waiting_room = None
+
+            room.ready_event.set()
+
+        else:
+
+            # Create a new game room
+            room = GameRoom()
+
+            player = "left"
+
+            room.players[player] = client
+
+            rooms.add(room)
+
+            waiting_room = room
+
+    return room, player
+
+
+# MAIN SERVER
 def main():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((HOST, PORT))
-    server.listen(2)
 
+    server = socket.socket(
+        socket.AF_INET,
+        socket.SOCK_STREAM
+    )
+
+    server.setsockopt(
+        socket.SOL_SOCKET,
+        socket.SO_REUSEADDR,
+        1
+    )
+
+    server.bind((HOST, PORT))
+
+    # Allow a large number of pending connections.
+    server.listen(socket.SOMAXCONN)
+
+    print("============================================")
+    print("         MULTIPLAYER PONG SERVER")
+    print("============================================")
     print(f"Server listening on {HOST}:{PORT}")
-    print("Waiting for two players...")
+    print("Waiting for players...")
+    print()
 
     try:
-        for player in ("left", "right"):
+
+        while True:
+
+            # Accept a new connection
+
             client, address = server.accept()
 
-            with lock:
-                clients[player] = client
+            print(f"New connection from {address}")
 
-            # Initial configuration message.
-            send_message(client, player, {
+            # Assign player to a game
+            room, player = assign_player(client)
+          
+            # Send initial configuration
+            configuration = {
                 "screen_width": SCREEN_WIDTH,
                 "screen_height": SCREEN_HEIGHT,
                 "player_paddle": player
-            })
+            }
 
-            print(f"{player} player connected: {address}")
+            try:
 
+                send_message(client, configuration)
+
+            except OSError:
+
+                print("Could not initialize client connection.")
+
+                client.close()
+
+                continue
+
+            print(
+                f"Assigned {player} player. "
+                f"Active game rooms: {len(rooms)}"
+            )
+
+            # Start a separate thread for this client
             threading.Thread(
                 target=handle_client,
-                args=(client, player),
+                args=(client, player, room),
                 daemon=True
             ).start()
 
-        print("Both players connected.")
-
-        while True:
-            threading.Event().wait(1)
-
     except KeyboardInterrupt:
+
         print("\nShutting down server...")
 
     finally:
-        with lock:
-            connected = list(clients.values())
-            clients.clear()
 
-        for client in connected:
-            try:
-                client.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            client.close()
+        # Disconnect all remaining players
+        with manager_lock:
+
+            active_rooms = list(rooms)
+
+            rooms.clear()
+
+            waiting_room = None
+
+        for room in active_rooms:
+
+            with room.lock:
+
+                room.closed = True
+
+                room.ready_event.set()
+
+                connected_players = [
+                    client
+                    for client in room.players.values()
+                    if client is not None
+                ]
+
+            for client in connected_players:
+
+                try:
+                    client.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+                client.close()
 
         server.close()
 
+        print("Server successfully shut down.")
+
+
+# PROGRAM ENTRY POINT
 
 if __name__ == "__main__":
     main()

@@ -75,6 +75,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
     rScore = 0
 
     sync = 0
+    play_again_requested = False
 
     try: 
         while True:
@@ -92,6 +93,10 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 
                     elif event.key == pygame.K_UP:
                         playerPaddleObj.moving = "up"
+
+                    elif event.key == pygame.K_r:
+                        if lScore > 4 or rScore > 4:
+                            play_again_requested = True
 
                 elif event.type == pygame.KEYUP:
                     playerPaddleObj.moving = ""
@@ -179,8 +184,12 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                     "left": lScore,
                     "right": rScore
                 },
-                "sync": sync
+                "sync": sync,
+                "action": "play_again" if play_again_requested else None
             }
+
+            # The request is sent only once.
+            play_again_requested = False
 
             sendMessage(client, message)
 
@@ -208,6 +217,32 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 
             # Synchronize game counters
             sync = max(serverData["sync"]["left"], serverData["sync"]["right"])
+            # Handle a new round starting.
+            if serverData.get("reset", False):
+            
+                # Reset scores.
+                lScore = 0
+                rScore = 0
+            
+                # Reset paddles.
+                leftPaddle.rect.x = 10
+                leftPaddle.rect.y = paddleStartPosY
+            
+                rightPaddle.rect.x = screenWidth - 20
+                rightPaddle.rect.y = paddleStartPosY
+            
+                # Reset the ball.
+                ball.reset(nowGoing="left")
+            
+                # Stop any paddle movement.
+                leftPaddle.moving = ""
+                rightPaddle.moving = ""
+            
+                # Reset the local synchronization counter.
+                sync = max(
+                    serverData["sync"]["left"],
+                    serverData["sync"]["right"]
+                )
 
     except(OSError, ConnectionError, json.JSONDecodeError) as error:
         errorLabel.config(text=f"Connection error: {error}")

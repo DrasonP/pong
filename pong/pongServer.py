@@ -166,9 +166,6 @@ class GameRoom:
                 }
 
             # Check for Play Again request
-                            """
-                        CHANGEME
-                           """
 
             if (message.get("action") == "play_again"
                     or message.get("play_again") is True):
@@ -328,7 +325,6 @@ def handle_client(client, player, room):
                 break
 
             message = json.loads(line)
-=
             # Wait until both players have joined
 
             # The first player can connect and send an update

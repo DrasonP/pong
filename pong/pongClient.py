@@ -16,17 +16,17 @@ from assets.code.helperCode import *
 
 #Send JSON message
 def sendMessage(client, message):
-    data = json.dumps(message) + "\n"
-    client.sendall(data.encode("utf-8"))
+    data = json.dumps(message) + "\n"   #Convert message into json
+    client.sendall(data.encode("utf-8"))  #Send data to server 
 
 #Recieve JSON message 
 def recieveMessage(stream):
-    data = stream.readline()
+    data = stream.readline()  #Read the stream to get the data send by the server
 
-    if not data:
+    if not data:   #If recieved json isn't data then raise an error
         raise ConnectionError("Server disconnected")
 
-    return json.loads(data.decode("utf-8"))
+    return json.loads(data.decode("utf-8"))   #Convert json back into message
 
 
 # This is the main game loop.  For the most part, you will not need to modify this.  The sections
@@ -71,9 +71,11 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         opponentPaddleObj = leftPaddle
         playerPaddleObj = rightPaddle
 
+    #Score variables
     lScore = 0
     rScore = 0
 
+    #Sync and play again variables
     sync = 0
     play_again_requested = False
 

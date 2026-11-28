@@ -130,7 +130,9 @@ class GameRoom:
             "game_over": self.game_over(),
             "round": self.round_number,
             "reset": reset,
-            "ready_to_restart": player in self.play_again
+            "ready_to_restart": player in self.play_again,
+            #inform the client whether an opponent has joined
+            "waiting_for_player": not self.ready_event.is_set() 
         }
 
     def process_update(self, player, message):
@@ -141,6 +143,11 @@ class GameRoom:
             # Ignore updates from a game that has been closed.
             if self.closed:
                 raise ConnectionError("Game room has closed.")
+
+            # Return the current game state without processing
+            # gameplay updates until both players have joined
+            if not self.ready_event.is_set():
+                return self.make_snapshot(player)
 
             # Store this player's paddle position.
             paddle = message["paddle"]
@@ -282,14 +289,12 @@ def handle_client(client, player, room):
 
             message = json.loads(line)
 
-            # Wait until the second player joins.
-            # This prevents sending incomplete game state.
-            room.ready_event.wait()
-
+            #stop processing if the game room has closed
             if room.closed:
                 break
 
-            # Process exactly one update and create one response.
+            # Process and respond to client updates without
+            # blocking while waiting for a second player
             snapshot = room.process_update(player, message)
 
             send_message(client, snapshot)

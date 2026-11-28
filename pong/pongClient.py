@@ -246,11 +246,10 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                     serverData["sync"]["right"]
                 )
 
-    except(OSError, ConnectionError, json.JSONDecodeError) as error:
-        errorLabel.config(text=f"Connection error: {error}")
-        errorLabel.update()
-
+    # allow connection errors to propagate to joinServer()
     finally:
+
+        #release resources when game ends or disconnects
         stream.close()
         client.close()
 
@@ -293,6 +292,11 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
         app.quit()         # Kills the window
 
     except (OSError, ValueError, KeyError, ConnectionError, json.JSONDecodeError) as error:
+
+        #restore the server login window
+        app.deiconify()
+
+        #display connection error to the player
         errorLabel.config(text=f"Connection Failed: {error}")
         errorLabel.update()
 
